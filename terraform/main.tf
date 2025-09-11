@@ -109,26 +109,3 @@ resource "azurerm_cosmosdb_account" "cosmos" {
     name = "EnableVnetServiceEndpoint"
   }
 }
-
-
-# Private Endpoint for Cosmos in VNet
-resource "azurerm_private_endpoint" "cosmos_pe" {
-  name                = "cosmos-pe"
-  location            = azurerm_resource_group.rg.location
-  resource_group_name = azurerm_resource_group.rg.name
-  subnet_id           = azurerm_subnet.subnet.id
-
-  private_service_connection {
-    name                           = "cosmos-priv-conn"
-    private_connection_resource_id = azurerm_cosmosdb_account.cosmos.id
-    subresource_names              = ["Sql"]
-    is_manual_connection           = false
-  }
-}
-
-# Random suffix for CosmosDB account (must be globally unique)
-resource "random_string" "rand" {
-  length  = 6
-  upper   = false
-  special = false
-}
