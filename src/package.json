@@ -1,13 +1,19 @@
 {
-  "name": "express-docker-demo",
+  "name": "azure-function-app-cosmos",
   "version": "1.0.0",
-  "description": "A simple Express.js server running in Docker",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
   "dependencies": {
-    "express": "^4.18.2"
+    "@azure/cosmos": "^4.5.0",
+    "@azure/identity": "^4.11.1",
+    "body-parser": "^2.2.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0"
   }
 }
-

@@ -1,4 +1,4 @@
 variable "location" {
-  type        = string
-  default     = "centralindia" 
+  type    = string
+  default = "centralindia"
 }

@@ -1,3 +1,5 @@
+data "azurerm_client_config" "current" {}
+
 # Resource group
 resource "azurerm_resource_group" "rg" {
   name     = "rg"
@@ -39,22 +41,40 @@ resource "azurerm_user_assigned_identity" "cosmos_identity" {
   resource_group_name = azurerm_resource_group.rg.name
 }
 
-resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment" {
-  name                = "cosmosdb-role-assignment"
+resource "azurerm_cosmosdb_sql_role_definition" "cosmos_sql_role_definition" {
+  name                = "examplesqlroledef"
   resource_group_name = azurerm_resource_group.rg.name
   account_name        = azurerm_cosmosdb_account.cosmos.name
-  role_definition_id  = "00000000-0000-0000-0000-000000000002"
+  type                = "CustomRole"
+  assignable_scopes   = [azurerm_cosmosdb_account.cosmos.id]
+
+  permissions {
+    data_actions = [
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/delete",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace",
+      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/executeQuery"
+    ]
+  }
+}
+
+resource "azurerm_cosmosdb_sql_role_assignment" "cosmosdb_role_assignment" {
+  name                = uuid()
+  resource_group_name = azurerm_resource_group.rg.name
+  account_name        = azurerm_cosmosdb_account.cosmos.name
+  role_definition_id  = azurerm_cosmosdb_sql_role_definition.cosmos_sql_role_definition.id
   principal_id        = azurerm_user_assigned_identity.cosmos_identity.principal_id
-  scope               = "/"
+  scope               = azurerm_cosmosdb_account.cosmos.id
 }
 
 # VM
 resource "azurerm_linux_virtual_machine" "vm" {
-  name                = "vm-sample"
+  name                = "vm"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   size                = "Standard_B1ms"
-  admin_username      = "azureuser"
+  admin_username      = "madmax"
 
   network_interface_ids           = [azurerm_network_interface.nic.id]
   admin_password                  = "Mohitdixit12345!"
@@ -78,34 +98,177 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 
   custom_data = base64encode(<<-EOF
-              #!/bin/bash
+              #!/bin/bash              
+              # Installing Nginx and Node.js
+              cd /home/madmax
               apt-get update -y
               apt-get install -y nginx
               echo "Hello from Azure VM with NGINX!" > /var/www/html/index.html
               systemctl enable nginx
               systemctl start nginx
-              EOF
+              curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
+              \. "$HOME/.nvm/nvm.sh"
+              nvm install 22              
+              # Installing dependencies and setting up the app
+              npm install -g pm2
+              cat >> index.js << EOL
+              require("dotenv").config();
+              const { DefaultAzureCredential, ManagedIdentityCredential } = require("@azure/identity");
+              const express = require("express");
+              const bodyParser = require("body-parser");
+              const { CosmosClient } = require("@azure/cosmos");
+              const credential = new DefaultAzureCredential();
+              const app = express();
+              app.use(bodyParser.json());
+
+              // Cosmos DB setup
+              const client = new CosmosClient({
+                endpoint: process.env.COSMOS_ENDPOINT,
+                aadCredentials: credential
+              });
+              const database = client.database(process.env.COSMOS_DATABASE);
+              const container = database.container(process.env.COSMOS_CONTAINER);
+
+              // CREATE
+              app.post("/items", async (req, res) => {
+                try {
+                  const { resource } = await container.items.create(req.body);
+                  res.status(201).json(resource);
+                } catch (err) {
+                  res.status(500).json({ error: err.message });
+                }
+              });
+
+              // READ ALL
+              app.get("/items", async (req, res) => {
+                try {
+                  const { resources } = await container.items.readAll().fetchAll();
+                  res.json(resources);
+                } catch (err) {
+                  res.status(500).json({ error: err.message });
+                }
+              });
+
+              // READ ONE
+              app.get("/items/:id", async (req, res) => {
+                try {
+                  const { resource } = await container.item(req.params.id, req.params.id).read();
+                  res.json(resource);
+                } catch (err) {
+                  res.status(404).json({ error: "Item not found" });
+                }
+              });
+
+              // UPDATE
+              app.put("/items/:id", async (req, res) => {
+                try {
+                  const updatedItem = { ...req.body, id: req.params.id };
+                  const { resource } = await container.items.upsert(updatedItem);
+                  res.json(resource);
+                } catch (err) {
+                  res.status(500).json({ error: err.message });
+                }
+              });
+
+              // DELETE
+              app.delete("/items/:id", async (req, res) => {
+                try {
+                  await container.item(req.params.id, req.params.id).delete();
+                  res.json({ status: "deleted" });
+                } catch (err) {
+                  res.status(404).json({ error: "Item not found" });
+                }
+              });
+
+              const PORT = 8080;
+              app.listen(PORT, () => console.log(`🚀 Server running on port 8080`));
+              EOL
+              
+              cat >> package.json << EOP
+              {
+                "name": "azure-function-app-cosmos",
+                "version": "1.0.0",
+                "main": "index.js",
+                "scripts": {
+                  "test": "echo \"Error: no test specified\" && exit 1"
+                },
+                "keywords": [],
+                "author": "",
+                "license": "ISC",
+                "description": "",
+                "dependencies": {
+                  "@azure/cosmos": "^4.5.0",
+                  "@azure/identity": "^4.11.1",
+                  "body-parser": "^2.2.0",
+                  "dotenv": "^17.2.1",
+                  "express": "^5.1.0"
+                }
+              }
+              EOP
+
+              cat >> .env << EOC 
+              COSMOS_ENDPOINT=https://madmaxcosmos.documents.azure.com:443/
+              COSMOS_DATABASE=db
+              COSMOS_CONTAINER=users
+              PORT=8080
+              EOC
+
+              pm2 start index.js
+              EOF              
   )
 }
 
 # CosmosDB Account
 resource "azurerm_cosmosdb_account" "cosmos" {
-  name                = "cosmosacct${random_string.rand.result}"
+  name                = "madmaxcosmos"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   offer_type          = "Standard"
   kind                = "GlobalDocumentDB"
 
   consistency_policy {
-    consistency_level = "Session"
+    consistency_level = "Strong"
   }
 
   geo_location {
     location          = azurerm_resource_group.rg.location
     failover_priority = 0
   }
-
-  capabilities {
-    name = "EnableVnetServiceEndpoint"
-  }
 }
+
+resource "azurerm_cosmosdb_sql_database" "database" {
+  name                = "db"
+  resource_group_name = azurerm_resource_group.rg.name
+  account_name        = azurerm_cosmosdb_account.cosmos.name
+  throughput          = 400
+}
+
+# resource "azurerm_cosmosdb_sql_container" "contaienr" {
+#   name                  = "container"
+#   resource_group_name   = azurerm_resource_group.rg.name
+#   account_name          = azurerm_cosmosdb_account.cosmos.name
+#   database_name         = azurerm_cosmosdb_sql_database.database.name
+#   partition_key_paths   = ["/definition/id"]
+#   partition_key_version = 1
+#   throughput            = 400
+
+#   indexing_policy {
+#     indexing_mode = "consistent"
+
+#     included_path {
+#       path = "/*"
+#     }
+
+#     included_path {
+#       path = "/included/?"
+#     }
+
+#     excluded_path {
+#       path = "/excluded/?"
+#     }
+#   }
+
+#   unique_key {
+#     paths = ["/definition/idlong", "/definition/idshort"]
+#   }
+# }

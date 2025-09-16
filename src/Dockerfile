@@ -1,18 +1,24 @@
-# Use Node.js LTS image
-FROM node:18-alpine
+# Use official Node.js LTS image
+FROM node:20-alpine AS base
 
 # Set working directory
 WORKDIR /app
 
-# Copy package.json and install dependencies
+# Copy only package.json and package-lock.json first (to leverage Docker caching)
 COPY package*.json ./
-RUN npm install --production
 
-# Copy rest of the code
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application source code
 COPY . .
 
-# Expose port
+# Set environment variables
+ENV NODE_ENV=production
+ENV PORT=8080
+
+# Expose the app port
 EXPOSE 8080
 
-# Start the app
-CMD ["npm", "start"]
+# Run the application
+CMD ["node", "index.js"]
