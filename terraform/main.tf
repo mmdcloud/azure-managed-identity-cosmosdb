@@ -6,6 +6,36 @@ resource "azurerm_resource_group" "rg" {
   location = var.location
 }
 
+resource "azurerm_network_security_group" "nsg" {
+  name                = "managed-identity-nsg"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  security_rule {
+    name                       = "allow-ssh"
+    priority                   = 100
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "22"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+
+  security_rule {
+    name                       = "allow-http"
+    priority                   = 110
+    direction                  = "Inbound"
+    access                     = "Allow"
+    protocol                   = "Tcp"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+  }
+}
+
 # VNet + Subnet
 resource "azurerm_virtual_network" "vnet" {
   name                = "vnet"
@@ -21,6 +51,13 @@ resource "azurerm_subnet" "subnet" {
   address_prefixes     = ["10.0.1.0/24"]
 }
 
+resource "azurerm_public_ip" "public_ip" {
+  name                = "vm-public-ip"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+}
+
 # Network interface
 resource "azurerm_network_interface" "nic" {
   name                = "nic"
@@ -31,7 +68,13 @@ resource "azurerm_network_interface" "nic" {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.public_ip.id
   }
+}
+
+resource "azurerm_network_interface_security_group_association" "nsg_nic" {
+  network_interface_id      = azurerm_network_interface.nic.id
+  network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
 # Managed Identity
@@ -54,7 +97,7 @@ resource "azurerm_cosmosdb_sql_role_definition" "cosmos_sql_role_definition" {
       "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/create",
       "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/delete",
       "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/replace",
-      "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/executeQuery"
+      # "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/executeQuery"
     ]
   }
 }
@@ -243,32 +286,12 @@ resource "azurerm_cosmosdb_sql_database" "database" {
   throughput          = 400
 }
 
-# resource "azurerm_cosmosdb_sql_container" "contaienr" {
-#   name                  = "container"
-#   resource_group_name   = azurerm_resource_group.rg.name
-#   account_name          = azurerm_cosmosdb_account.cosmos.name
-#   database_name         = azurerm_cosmosdb_sql_database.database.name
-#   partition_key_paths   = ["/definition/id"]
-#   partition_key_version = 1
-#   throughput            = 400
-
-#   indexing_policy {
-#     indexing_mode = "consistent"
-
-#     included_path {
-#       path = "/*"
-#     }
-
-#     included_path {
-#       path = "/included/?"
-#     }
-
-#     excluded_path {
-#       path = "/excluded/?"
-#     }
-#   }
-
-#   unique_key {
-#     paths = ["/definition/idlong", "/definition/idshort"]
-#   }
-# }
+resource "azurerm_cosmosdb_sql_container" "contaienr" {
+  name                  = "container"
+  resource_group_name   = azurerm_resource_group.rg.name
+  account_name          = azurerm_cosmosdb_account.cosmos.name
+  database_name         = azurerm_cosmosdb_sql_database.database.name
+  partition_key_paths   = ["/id"]
+  partition_key_version = 1
+  throughput            = 400
+}
