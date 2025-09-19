@@ -149,11 +149,12 @@ resource "azurerm_linux_virtual_machine" "vm" {
               echo "Hello from Azure VM with NGINX!" > /var/www/html/index.html
               systemctl enable nginx
               systemctl start nginx
-              curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash
-              \. "$HOME/.nvm/nvm.sh"
-              nvm install 22              
-              # Installing dependencies and setting up the app
-              npm install -g pm2
+              curl -sL https://deb.nodesource.com/setup_20.x -o nodesource_setup.sh
+              sudo bash nodesource_setup.sh
+              sudo apt install nodejs -y
+              # Installing PM2
+              sudo npm i -g pm2              
+              
               cat >> index.js << EOL
               require("dotenv").config();
               const { DefaultAzureCredential, ManagedIdentityCredential } = require("@azure/identity");
@@ -255,7 +256,24 @@ resource "azurerm_linux_virtual_machine" "vm" {
               COSMOS_CONTAINER=users
               PORT=8080
               EOC
+              cat > /etc/nginx/sites-available/default << EONG
+              server {
+                  listen 80;
+                  server_name _;
 
+                  location / {
+                      proxy_pass http://127.0.0.1:8080;
+                      proxy_http_version 1.1;
+                      proxy_set_header Upgrade \$http_upgrade;
+                      proxy_set_header Connection 'upgrade';
+                      proxy_set_header Host \$host;
+                      proxy_cache_bypass \$http_upgrade;
+                  }
+              }
+              EONG
+              systemctl restart nginx
+                            
+              npm install
               pm2 start index.js
               EOF              
   )
